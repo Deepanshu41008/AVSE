@@ -1,0 +1,116 @@
+#Audio Decoder
+
+class AudioDecoder(nn.Module):
+    '''
+    Decoder of the TasNet
+    '''
+    def __init__(self,):
+        super(AudioDecoder,self).__init__()
+        self.decoder = nn.ConvTranspose1d(256,1,40,20)
+    
+    def forward(self,x):
+        out = self.decoder(x)
+        return out 
+
+#separation network
+def select_norm(norm, dim):
+    '''
+    select normolization method
+    norm: the one in ['gln','cln','bn']
+    '''
+    if norm not in ['gln', 'cln', 'bn']:
+        raise RuntimeError("only accept['gln','cln','bn']")
+    if norm == 'gln':
+        return GlobalLayerNorm(dim, elementwise_affine=True)
+    elif norm == 'cln':
+        return CumulativeLayerNorm(dim, trainable=True)
+    elif norm == 'bn':
+        return nn.BatchNorm1d(dim)
+
+class Conv1D_Block(nn.Module):
+    '''
+    sub-block with the exponential growth dilation factors 2**d
+    '''
+
+    def __init__(self, in_channels=256, out_channels=256, kernel_size=3,
+                 dilation=1, norm='gln', causal=False):
+        super(Conv1D_Block, self).__init__()
+        # this conv1d determines the number of channels
+        self.linear = nn.Conv1d(in_channels, out_channels, 1,1)  # set kernel_size=1
+        self.ReLu = nn.ReLU(True)
+        self.norm = select_norm(norm, out_channels)
+        # keep time length unchanged
+        self.pad = (dilation*(kernel_size-1))//2 if not causal else (
+            dilation * (kernel_size-1))
+
+        self.DepthwiseConv = nn.Conv1d(out_channels, out_channels,
+                                    kernel_size, groups=out_channels, padding=self.pad,dilation=dilation)
+        self.SeparableConv = nn.Conv1d(out_channels, in_channels, 1)
+        self.causal = causal
+
+    def forward(self, x):
+        c = self.linear(x)
+        
+        c = self.ReLu(c)
+        c = self.norm(c)
+        c = self.DepthwiseConv(c)
+        if self.causal:
+            c = c[:, :, :-self.pad]
+        c = self.SeparableConv(c)
+        return x+c
+
+class Conv1D_S(nn.Module):
+    def __init__(self,num_repeats,num_blocks):
+        super(Conv1D_S,self).__init__()
+        self.net = self._Sequential_repeat(num_repeats=num_repeats, num_blocks=num_blocks, 
+        in_channels=256, out_channels=256,
+            kernel_size=3,norm='gln', causal=False)
+        
+    def forward(self, x):
+        c = self.net(x)
+        return c  #shape [-1,1,256]
+
+    def _Sequential_repeat(self, num_repeats, num_blocks, **kwargs):
+        repeat_lists = [self._Sequential_block(
+            num_blocks, **kwargs) for i in range(num_repeats)]
+        return nn.Sequential(*repeat_lists)
+
+    def _Sequential_block(self, num_blocks, **kwargs):
+        '''
+        Sequential 1-D Conv Block
+        input:
+            num_blocks:times the block appears
+            **block_kwargs
+        '''
+        Conv1D_Block_lists = [Conv1D_Block(
+            **kwargs, dilation=(2**i)) for i in range(num_blocks)]
+        return nn.Sequential(*Conv1D_Block_lists)
+
+class Separation(nn.Module):
+    def __init__(self,):
+        super(Separation,self).__init__()
+        self.Conv1D_S_pre = Conv1D_S(num_repeats=1,num_blocks=8)
+
+        self.Conv1D_S_post = Conv1D_S(num_repeats=3,num_blocks=8)
+
+        self.project = nn.Conv1d(256*2, 256, 1,1)  
+
+
+
+
+    def forward(self,audio_em,video_em):
+
+        audio_em = self.Conv1D_S_pre(audio_em)
+        # print('audio_emb',audio_em.shape) #b,256,length
+        # print('video_emb ',video_em.shape) #b,256,length 
+
+        video_em =  F.interpolate(video_em, size=audio_em.shape[2], mode='linear')
+
+
+        concat = torch.cat((audio_em,video_em),dim=1) 
+        #
+        projected = self.project(concat)
+
+        out = self.Conv1D_S_post(projected)
+
+        return out 
