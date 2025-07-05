@@ -13,15 +13,19 @@ speech clarity in degraded environments.
 • The audio encoder employs a UNet-like 1D convolutional 
 network to directly process raw noisy waveforms, capturing 
 multi-scale temporal dependencies for efficiently extracting 
-robust, noise-tolerant features without explicit frequency domain conversion. 63
+robust, noise-tolerant features without explicit frequency domain conversion.
+
 • A Swin Transformer V2 video encoder is utilized to extract 
 rich, multi-scale spatial features from silent video frames 
 (e.g., lip movements and facial dynamics), providing crucial 
-noise-independent visual cues that aid in speech disambiguation. 
+noise-independent visual cues that aid in speech disambiguation.
+
 • A bi-directional cross-attention mechanism fuses the audio 
 and visual features iteratively, enabling mutual contextualiza
 tion and forming a unified representation. This fused embedding is further refined through temporal modeling and passed 
-to a U-Net–style decoder for waveform reconstruction. 
+to a U-Net–style decoder for waveform reconstruction.
+
+
 Together, these components form a unified, cross-modal architecture that combines the strengths of both audio and visual 
 inputs while introducing key innovations—such as raw waveform encoding, spatially rich visual processing, and bidirec- 
 tional cross-modal fusion.
